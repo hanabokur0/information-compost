@@ -1,0 +1,295 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://example.org/information-compost/schemas/receipt.schema.yaml"
+title: Information Compost Receipt
+summary: >-
+  Minimal schema for recording an action, its traces, relevant context,
+  normalized observations, uncertainty, and a non-prescriptive reflection.
+type: object
+additionalProperties: false
+required:
+  - receipt
+properties:
+  receipt:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - version
+      - occurred_at
+      - recorded_at
+      - action
+      - traces
+      - reflection
+    properties:
+      id:
+        type: string
+        minLength: 1
+        pattern: "^[A-Za-z0-9._:-]+$"
+        description: Stable identifier for this Receipt.
+
+      version:
+        type: string
+        const: "0.1.0"
+
+      occurred_at:
+        type: string
+        format: date-time
+        description: When the action or event occurred.
+
+      recorded_at:
+        type: string
+        format: date-time
+        description: When the Receipt was written or normalized.
+
+      source:
+        type: object
+        additionalProperties: false
+        properties:
+          mode:
+            type: string
+            enum:
+              - manual
+              - imported
+              - generated
+              - mixed
+          refs:
+            type: array
+            items:
+              type: string
+              minLength: 1
+            uniqueItems: true
+        required:
+          - mode
+
+      action:
+        type: object
+        additionalProperties: false
+        required:
+          - summary
+        properties:
+          summary:
+            type: string
+            minLength: 1
+          category:
+            type:
+              - string
+              - "null"
+          intentional:
+            type:
+              - boolean
+              - "null"
+          outcome:
+            type:
+              - string
+              - "null"
+
+      traces:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: false
+          required:
+            - type
+            - value
+          properties:
+            type:
+              type: string
+              enum:
+                - note
+                - receipt
+                - image
+                - audio
+                - location
+                - metric
+                - file
+                - link
+                - other
+            value:
+              description: Human-readable trace value or reference.
+              type:
+                - string
+                - number
+                - boolean
+                - object
+                - array
+            observed_at:
+              type:
+                - string
+                - "null"
+              format: date-time
+            provenance:
+              type:
+                - string
+                - "null"
+            confidence:
+              type:
+                - string
+                - "null"
+              enum:
+                - high
+                - medium
+                - low
+                - unknown
+                - null
+
+      context:
+        type: object
+        additionalProperties: true
+        description: >-
+          Optional situational context. Open by design so local vocabularies can
+          develop without changing the core schema.
+
+      normalization:
+        type: object
+        additionalProperties: false
+        properties:
+          status:
+            type: string
+            enum:
+              - raw
+              - normalized
+              - partially_normalized
+          facts:
+            type: array
+            items:
+              type: string
+              minLength: 1
+          inferred:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required:
+                - statement
+                - confidence
+              properties:
+                statement:
+                  type: string
+                  minLength: 1
+                confidence:
+                  type: string
+                  enum:
+                    - high
+                    - medium
+                    - low
+                basis:
+                  type:
+                    - string
+                    - "null"
+          unknowns:
+            type: array
+            items:
+              type: string
+              minLength: 1
+        required:
+          - status
+          - facts
+          - inferred
+          - unknowns
+
+      pause:
+        type: object
+        additionalProperties: false
+        properties:
+          status:
+            type: string
+            enum:
+              - not_started
+              - in_progress
+              - completed
+              - intentionally_skipped
+          method:
+            type:
+              - string
+              - "null"
+            enum:
+              - breathing
+              - walking
+              - sleeping
+              - waiting
+              - other
+              - null
+          duration_minutes:
+            type:
+              - integer
+              - "null"
+            minimum: 0
+          revisited_at:
+            type:
+              - string
+              - "null"
+            format: date-time
+        required:
+          - status
+
+      reflection:
+        type: object
+        additionalProperties: false
+        required:
+          - status
+        properties:
+          status:
+            type: string
+            enum:
+              - pending
+              - drafted
+              - reviewed
+              - left_open
+          observation:
+            type:
+              - string
+              - "null"
+          repeated_pattern:
+            type:
+              - string
+              - "null"
+          new_question:
+            type:
+              - string
+              - "null"
+          next_experiment:
+            type:
+              - string
+              - "null"
+          non_prescriptive:
+            type: boolean
+            const: true
+            default: true
+          confidence:
+            type:
+              - string
+              - "null"
+            enum:
+              - high
+              - medium
+              - low
+              - insufficient_context
+              - null
+
+      outputs:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required:
+            - type
+            - path
+          properties:
+            type:
+              type: string
+              enum:
+                - journal
+                - story
+                - protocol
+                - question_list
+                - evidence_pack
+                - other
+            path:
+              type: string
+              minLength: 1
+            generated_at:
+              type:
+                - string
+                - "null"
+              format: date-time
