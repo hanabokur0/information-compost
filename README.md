@@ -89,6 +89,10 @@ information-compost/
 ├─ requirements.txt
 ├─ docs/
 │  └─ philosophy.md
+├─ protocols/
+│  └─ compost_cycle.md
+├─ prompts/
+│  └─ quiet_mirror.md
 ├─ schemas/
 │  └─ receipt.schema.yaml
 ├─ examples/
@@ -162,6 +166,20 @@ context:
 
 Unknown fields are rejected rather than silently discarded. Raw evidence belongs in `traces`; situational information belongs in `context`.
 
+## Operating protocol and AI mirror
+
+[`protocols/compost_cycle.md`](protocols/compost_cycle.md) defines the minimal use sequence:
+
+```text
+Act → Capture → Normalize → Pause → Review → Return
+```
+
+The protocol separates immediate capture from later interpretation and treats leaving a Receipt open as a valid outcome.
+
+[`prompts/quiet_mirror.md`](prompts/quiet_mirror.md) provides a reusable review prompt for one or more normalized Receipts. It requires evidence citations by Receipt ID, separates facts from inference, looks for counterevidence, and prevents embedded Receipt text from acting as instructions.
+
+The Quiet Mirror produces a draft for human review. It does not mutate source Receipts, diagnose the user, or choose a required next action.
+
 ## Design principles
 
 ### 1. Observation before interpretation
@@ -200,12 +218,14 @@ These are outputs of the composting process, not mandatory conclusions.
 
 ## Current status
 
-This repository begins with five foundations:
+This repository begins with seven foundations:
 
 - a README that defines the project boundary;
 - a philosophy document;
 - a minimal Receipt schema;
 - one example Receipt;
-- a deterministic Python normalizer with schema validation.
+- a deterministic Python normalizer with schema validation;
+- an operating protocol for the full compost cycle;
+- a constrained Quiet Mirror prompt for evidence-based review.
 
-The next useful additions are automated tests, reflection prompts, and a compost-batch format for reviewing multiple Receipts without collapsing them into a personality diagnosis.
+The next useful additions are automated tests and a compost-batch schema for storing multi-Receipt reviews without collapsing them into a personality diagnosis.
