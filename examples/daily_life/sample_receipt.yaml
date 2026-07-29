@@ -1,0 +1,106 @@
+receipt:
+  id: receipt-2026-07-29-001
+  version: 0.1.0
+  occurred_at: "2026-07-29T18:30:00+09:00"
+  recorded_at: "2026-07-29T20:10:00+09:00"
+
+  source:
+    mode: manual
+    refs:
+      - paper-receipt-2026-07-29-supermarket
+      - note-after-walk
+
+  action:
+    summary: Walked to the supermarket after work and bought ingredients for dinner.
+    category: daily_life
+    intentional: true
+    outcome: Cooked tofu, vegetables, and rice instead of buying prepared food.
+
+  traces:
+    - type: receipt
+      value:
+        store: neighborhood-supermarket
+        total_jpy: 1384
+        items:
+          - name: tofu
+            quantity: 2
+            price_jpy: 196
+          - name: green_peppers
+            quantity: 1
+            price_jpy: 178
+          - name: mushrooms
+            quantity: 1
+            price_jpy: 198
+          - name: tomatoes
+            quantity: 1
+            price_jpy: 398
+          - name: rice
+            quantity: 1
+            price_jpy: 414
+      observed_at: "2026-07-29T18:47:00+09:00"
+      provenance: Transcribed from a paper receipt.
+      confidence: high
+
+    - type: note
+      value: I was tired and almost bought prepared food, but chose ingredients because cooking felt quieter than choosing among many finished meals.
+      observed_at: "2026-07-29T19:05:00+09:00"
+      provenance: Written from memory approximately twenty minutes later.
+      confidence: medium
+
+    - type: metric
+      value:
+        walk_minutes: 24
+        perceived_energy_before: 3
+        perceived_energy_after: 4
+        scale: 1_to_5
+      observed_at: "2026-07-29T19:20:00+09:00"
+      provenance: Self-reported estimate.
+      confidence: medium
+
+  context:
+    weather:
+      condition: hot
+      note: Humid evening; no exact measurement recorded.
+    workday:
+      cognitive_load: high
+      unfinished_tasks: 2
+    body:
+      eye_strain: noticeable
+      hunger: moderate
+
+  normalization:
+    status: normalized
+    facts:
+      - The user walked to the supermarket after work.
+      - The recorded purchase total was 1,384 JPY.
+      - The user bought ingredients rather than prepared food.
+      - The user cooked dinner after returning home.
+      - The walk was estimated at twenty-four minutes.
+    inferred:
+      - statement: Cooking may have functioned as a low-stimulation transition after a cognitively demanding workday.
+        confidence: low
+        basis: The note describes cooking as quieter than selecting prepared meals, but this is only one event.
+      - statement: Light movement may have slightly improved perceived energy.
+        confidence: low
+        basis: Self-reported energy changed from 3 to 4 after the walk; other causes were not recorded.
+    unknowns:
+      - Whether this choice repeats on other high-load workdays.
+      - Whether price, health, habit, or sensory load was the strongest factor.
+      - Whether the walk or the meal preparation mattered more to the change in energy.
+
+  pause:
+    status: completed
+    method: breathing
+    duration_minutes: 5
+    revisited_at: "2026-07-29T20:10:00+09:00"
+
+  reflection:
+    status: reviewed
+    observation: On a tiring day, a small physical routine and a simple act of making something may have created a transition out of work mode.
+    repeated_pattern: null
+    new_question: When work leaves me overstimulated, do I recover better through passive convenience or through a small, bounded act of making?
+    next_experiment: Record three more high-load evenings without trying to force the same behavior.
+    non_prescriptive: true
+    confidence: insufficient_context
+
+  outputs: []
