@@ -229,3 +229,14 @@ This repository begins with seven foundations:
 - a constrained Quiet Mirror prompt for evidence-based review.
 
 The next useful additions are automated tests and a compost-batch schema for storing multi-Receipt reviews without collapsing them into a personality diagnosis.
+
+## License
+
+Copyright 2026 hanabokur0.
+
+This repository, including its code, schemas, prompts, protocols, documentation, and examples, is licensed under the [Apache License 2.0](LICENSE).
+
+You may use, modify, and distribute the materials, including for commercial purposes, subject to the license terms. Preserve the license and applicable notices when redistributing modified or unmodified copies.
+
+The license applies to the materials in this repository. It does not grant exclusive rights to general ideas, methods, project names, or third-party material that may be referenced in future Receipts.
+
