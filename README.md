@@ -86,13 +86,16 @@ Repository
 ```text
 information-compost/
 ├─ README.md
+├─ requirements.txt
 ├─ docs/
 │  └─ philosophy.md
 ├─ schemas/
 │  └─ receipt.schema.yaml
-└─ examples/
-   └─ daily_life/
-      └─ sample_receipt.yaml
+├─ examples/
+│  └─ daily_life/
+│     └─ sample_receipt.yaml
+└─ tools/
+   └─ normalize_receipt.py
 ```
 
 ## Minimal Receipt
@@ -116,6 +119,48 @@ receipt:
 ```
 
 See [`schemas/receipt.schema.yaml`](schemas/receipt.schema.yaml) for the minimal machine-readable format and [`examples/daily_life/sample_receipt.yaml`](examples/daily_life/sample_receipt.yaml) for a complete example.
+
+## Executable normalizer
+
+[`tools/normalize_receipt.py`](tools/normalize_receipt.py) turns a small handwritten YAML note into the canonical Receipt structure and validates the result against the repository schema.
+
+It is deliberately deterministic. It may normalize field shapes, timestamps, IDs, and defaults, but it does not invent facts, infer personality, or generate advice.
+
+Install the two lightweight dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Normalize a raw note:
+
+```bash
+python tools/normalize_receipt.py raw.yaml \
+  --default-offset +09:00 \
+  --output receipt.yaml
+```
+
+Normalize and validate an existing Receipt without writing a new file:
+
+```bash
+python tools/normalize_receipt.py \
+  examples/daily_life/sample_receipt.yaml \
+  --check
+```
+
+The raw input can use the full Receipt structure or this smaller form:
+
+```yaml
+occurred_at: 2026-07-29T18:30:00+09:00
+summary: Walked to the supermarket after work.
+notes:
+  - Chose ingredients instead of prepared food.
+context:
+  energy: low
+  weather: hot
+```
+
+Unknown fields are rejected rather than silently discarded. Raw evidence belongs in `traces`; situational information belongs in `context`.
 
 ## Design principles
 
@@ -155,11 +200,12 @@ These are outputs of the composting process, not mandatory conclusions.
 
 ## Current status
 
-This repository begins with four foundations:
+This repository begins with five foundations:
 
 - a README that defines the project boundary;
 - a philosophy document;
 - a minimal Receipt schema;
-- one example Receipt.
+- one example Receipt;
+- a deterministic Python normalizer with schema validation.
 
-The next useful additions are validation tests, reflection prompts, and a small normalizer that preserves the difference between fact, interpretation, and uncertainty.
+The next useful additions are automated tests, reflection prompts, and a compost-batch format for reviewing multiple Receipts without collapsing them into a personality diagnosis.
