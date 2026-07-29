@@ -25,7 +25,9 @@ import hashlib
 import json
 import re
 import sys
+from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Sequence
 
@@ -39,22 +41,93 @@ except ImportError as exc:  # pragma: no cover - environment-dependent
 
 VERSION = "0.1.0"
 DEFAULT_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "receipt.schema.yaml"
-TRACE_TYPES = {
-    "note",
-    "receipt",
-    "image",
-    "audio",
-    "location",
-    "metric",
-    "file",
-    "link",
-    "other",
-}
-CONFIDENCE_VALUES = {"high", "medium", "low", "unknown"}
 
 
 class NormalizationError(ValueError):
     """Raised when a raw Receipt cannot be normalized safely."""
+
+
+@dataclass(frozen=True)
+class SchemaEnums:
+    """Allowed values pulled from the Receipt schema.
+
+    The schema is the single source of truth for these vocabularies. The
+    normalizer never hardcodes them, so schema and code cannot silently
+    drift apart from one another.
+    """
+
+    source_mode: frozenset[str]
+    trace_type: frozenset[str]
+    trace_confidence: frozenset[str]
+    normalization_status: frozenset[str]
+    inferred_confidence: frozenset[str]
+    pause_status: frozenset[str]
+    pause_method: frozenset[str]
+    reflection_status: frozenset[str]
+    reflection_confidence: frozenset[str]
+    output_type: frozenset[str]
+
+
+def _walk(node: Any, path: Sequence[str]) -> Any:
+    for key in path:
+        if not isinstance(node, Mapping) or key not in node:
+            raise NormalizationError(
+                "Schema is missing expected path "
+                f"'{'/'.join(path)}'; the normalizer and the Receipt schema "
+                "have drifted apart."
+            )
+        node = node[key]
+    return node
+
+
+def _enum(schema: Mapping[str, Any], *path: str) -> frozenset[str]:
+    values = _walk(schema, path)
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
+        raise NormalizationError(f"Schema path '{'/'.join(path)}' is not an enum list.")
+    return frozenset(value for value in values if isinstance(value, str))
+
+
+@lru_cache(maxsize=8)
+def _load_schema_enums(schema_path: Path) -> SchemaEnums:
+    """Load the vocabularies the normalizer needs to validate against.
+
+    This only parses YAML; it does not require the optional jsonschema
+    dependency, so the enums stay authoritative even when full schema
+    validation is skipped with --no-validate.
+    """
+    if not schema_path.exists():
+        raise NormalizationError(f"Schema not found: {schema_path}")
+    schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    receipt = ("properties", "receipt", "properties")
+
+    return SchemaEnums(
+        source_mode=_enum(schema, *receipt, "source", "properties", "mode", "enum"),
+        trace_type=_enum(schema, *receipt, "traces", "items", "properties", "type", "enum"),
+        trace_confidence=_enum(
+            schema, *receipt, "traces", "items", "properties", "confidence", "enum"
+        ),
+        normalization_status=_enum(
+            schema, *receipt, "normalization", "properties", "status", "enum"
+        ),
+        inferred_confidence=_enum(
+            schema,
+            *receipt,
+            "normalization",
+            "properties",
+            "inferred",
+            "items",
+            "properties",
+            "confidence",
+            "enum",
+        ),
+        pause_status=_enum(schema, *receipt, "pause", "properties", "status", "enum"),
+        pause_method=_enum(schema, *receipt, "pause", "properties", "method", "enum"),
+        reflection_status=_enum(schema, *receipt, "reflection", "properties", "status", "enum"),
+        reflection_confidence=_enum(
+            schema, *receipt, "reflection", "properties", "confidence", "enum"
+        ),
+        output_type=_enum(schema, *receipt, "outputs", "items", "properties", "type", "enum"),
+    )
 
 
 def _plain(value: Any) -> Any:
@@ -138,7 +211,7 @@ def _generated_id(payload: Mapping[str, Any], occurred_at: str) -> str:
     return f"receipt-{day}-{digest}"
 
 
-def _normalize_source(value: Any) -> dict[str, Any]:
+def _normalize_source(value: Any, enums: SchemaEnums) -> dict[str, Any]:
     if value is None:
         return {"mode": "manual", "refs": []}
     if isinstance(value, str):
@@ -147,7 +220,7 @@ def _normalize_source(value: Any) -> dict[str, Any]:
         raise NormalizationError("source must be a mapping, string, or null.")
 
     mode = str(value.get("mode", "manual"))
-    if mode not in {"manual", "imported", "generated", "mixed"}:
+    if mode not in enums.source_mode:
         raise NormalizationError(f"Unsupported source.mode: {mode!r}.")
 
     refs_raw = value.get("refs", [])
@@ -201,6 +274,7 @@ def _normalize_trace(
     *,
     index: int,
     default_tz: timezone | None,
+    enums: SchemaEnums,
 ) -> dict[str, Any]:
     if isinstance(value, Mapping) and ("type" in value or "value" in value):
         trace_type = str(value.get("type", _guess_trace_type(value.get("value"))))
@@ -215,16 +289,17 @@ def _normalize_trace(
         provenance = None
         confidence = "unknown"
 
-    if trace_type not in TRACE_TYPES:
+    if trace_type not in enums.trace_type:
         raise NormalizationError(
-            f"traces[{index}].type must be one of {sorted(TRACE_TYPES)}; "
+            f"traces[{index}].type must be one of {sorted(enums.trace_type)}; "
             f"received {trace_type!r}."
         )
     if trace_value is None:
         raise NormalizationError(f"traces[{index}].value is required.")
-    if confidence is not None and confidence not in CONFIDENCE_VALUES:
+    if confidence is not None and confidence not in enums.trace_confidence:
         raise NormalizationError(
-            f"traces[{index}].confidence must be high, medium, low, unknown, or null."
+            f"traces[{index}].confidence must be one of "
+            f"{sorted(enums.trace_confidence)} or null."
         )
 
     normalized_observed_at = None
@@ -244,7 +319,9 @@ def _normalize_trace(
     }
 
 
-def _normalize_traces(value: Any, default_tz: timezone | None) -> list[dict[str, Any]]:
+def _normalize_traces(
+    value: Any, default_tz: timezone | None, enums: SchemaEnums
+) -> list[dict[str, Any]]:
     if value is None:
         raise NormalizationError("traces is required and must contain at least one trace.")
     if isinstance(value, (str, bytes, bytearray, Mapping)):
@@ -258,7 +335,7 @@ def _normalize_traces(value: Any, default_tz: timezone | None) -> list[dict[str,
         raise NormalizationError("traces must contain at least one trace.")
 
     return [
-        _normalize_trace(item, index=index, default_tz=default_tz)
+        _normalize_trace(item, index=index, default_tz=default_tz, enums=enums)
         for index, item in enumerate(values)
     ]
 
@@ -273,7 +350,16 @@ def _string_list(value: Any, field_name: str) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
-def _normalize_inferred(value: Any) -> list[dict[str, Any]]:
+def _normalize_context(value: Any) -> dict[str, Any]:
+    """Preserve context mappings without silently coercing invalid values."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise NormalizationError("context must be a mapping or null.")
+    return _plain(value)
+
+
+def _normalize_inferred(value: Any, enums: SchemaEnums) -> list[dict[str, Any]]:
     if value is None:
         return []
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
@@ -294,9 +380,10 @@ def _normalize_inferred(value: Any) -> list[dict[str, Any]]:
 
         if not statement:
             raise NormalizationError(f"normalization.inferred[{index}].statement is required.")
-        if confidence not in {"high", "medium", "low"}:
+        if confidence not in enums.inferred_confidence:
             raise NormalizationError(
-                f"normalization.inferred[{index}].confidence must be high, medium, or low."
+                f"normalization.inferred[{index}].confidence must be one of "
+                f"{sorted(enums.inferred_confidence)}."
             )
         result.append(
             {
@@ -308,25 +395,27 @@ def _normalize_inferred(value: Any) -> list[dict[str, Any]]:
     return result
 
 
-def _normalize_normalization(value: Any) -> dict[str, Any]:
+def _normalize_normalization(value: Any, enums: SchemaEnums) -> dict[str, Any]:
     if value is None:
         return {"status": "raw", "facts": [], "inferred": [], "unknowns": []}
     if not isinstance(value, Mapping):
         raise NormalizationError("normalization must be a mapping or null.")
 
     status = str(value.get("status", "raw"))
-    if status not in {"raw", "normalized", "partially_normalized"}:
+    if status not in enums.normalization_status:
         raise NormalizationError(f"Unsupported normalization.status: {status!r}.")
 
     return {
         "status": status,
         "facts": _string_list(value.get("facts"), "normalization.facts"),
-        "inferred": _normalize_inferred(value.get("inferred")),
+        "inferred": _normalize_inferred(value.get("inferred"), enums),
         "unknowns": _string_list(value.get("unknowns"), "normalization.unknowns"),
     }
 
 
-def _normalize_pause(value: Any, default_tz: timezone | None) -> dict[str, Any]:
+def _normalize_pause(
+    value: Any, default_tz: timezone | None, enums: SchemaEnums
+) -> dict[str, Any]:
     if value is None:
         return {
             "status": "not_started",
@@ -337,6 +426,19 @@ def _normalize_pause(value: Any, default_tz: timezone | None) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise NormalizationError("pause must be a mapping or null.")
 
+    status = str(value.get("status", "not_started"))
+    if status not in enums.pause_status:
+        raise NormalizationError(
+            f"pause.status must be one of {sorted(enums.pause_status)}; received {status!r}."
+        )
+
+    method = value.get("method")
+    if method is not None and method not in enums.pause_method:
+        raise NormalizationError(
+            f"pause.method must be one of {sorted(enums.pause_method)} or null; "
+            f"received {method!r}."
+        )
+
     revisited_at = value.get("revisited_at")
     if revisited_at is not None:
         revisited_at = _normalize_datetime(
@@ -346,14 +448,14 @@ def _normalize_pause(value: Any, default_tz: timezone | None) -> dict[str, Any]:
         )
 
     return {
-        "status": value.get("status", "not_started"),
-        "method": value.get("method"),
+        "status": status,
+        "method": method,
         "duration_minutes": value.get("duration_minutes"),
         "revisited_at": revisited_at,
     }
 
 
-def _normalize_reflection(value: Any) -> dict[str, Any]:
+def _normalize_reflection(value: Any, enums: SchemaEnums) -> dict[str, Any]:
     if value is None:
         data: Mapping[str, Any] = {}
     elif isinstance(value, str):
@@ -363,19 +465,35 @@ def _normalize_reflection(value: Any) -> dict[str, Any]:
     else:
         raise NormalizationError("reflection must be a string, mapping, or null.")
 
+    status = str(data.get("status", "pending"))
+    if status not in enums.reflection_status:
+        raise NormalizationError(
+            f"reflection.status must be one of {sorted(enums.reflection_status)}; "
+            f"received {status!r}."
+        )
+
+    confidence = data.get("confidence", "insufficient_context")
+    if confidence is not None and confidence not in enums.reflection_confidence:
+        raise NormalizationError(
+            f"reflection.confidence must be one of {sorted(enums.reflection_confidence)} "
+            "or null."
+        )
+
     # The normalizer enforces the protocol boundary even when the input says otherwise.
     return {
-        "status": data.get("status", "pending"),
+        "status": status,
         "observation": data.get("observation"),
         "repeated_pattern": data.get("repeated_pattern"),
         "new_question": data.get("new_question"),
         "next_experiment": data.get("next_experiment"),
         "non_prescriptive": True,
-        "confidence": data.get("confidence", "insufficient_context"),
+        "confidence": confidence,
     }
 
 
-def _normalize_outputs(value: Any, default_tz: timezone | None) -> list[dict[str, Any]]:
+def _normalize_outputs(
+    value: Any, default_tz: timezone | None, enums: SchemaEnums
+) -> list[dict[str, Any]]:
     if value is None:
         return []
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
@@ -385,6 +503,14 @@ def _normalize_outputs(value: Any, default_tz: timezone | None) -> list[dict[str
     for index, item in enumerate(value):
         if not isinstance(item, Mapping):
             raise NormalizationError(f"outputs[{index}] must be a mapping.")
+
+        output_type = item.get("type")
+        if output_type not in enums.output_type:
+            raise NormalizationError(
+                f"outputs[{index}].type must be one of {sorted(enums.output_type)}; "
+                f"received {output_type!r}."
+            )
+
         generated_at = item.get("generated_at")
         if generated_at is not None:
             generated_at = _normalize_datetime(
@@ -394,7 +520,7 @@ def _normalize_outputs(value: Any, default_tz: timezone | None) -> list[dict[str
             )
         outputs.append(
             {
-                "type": item.get("type"),
+                "type": output_type,
                 "path": item.get("path"),
                 "generated_at": generated_at,
             }
@@ -407,6 +533,7 @@ def normalize_receipt(
     *,
     recorded_at: str | None = None,
     default_offset: str | None = None,
+    schema_path: Path = DEFAULT_SCHEMA,
 ) -> dict[str, Any]:
     """Return one canonical Receipt document without adding interpretations."""
     if not isinstance(raw_document, Mapping):
@@ -418,6 +545,7 @@ def normalize_receipt(
 
     payload: MutableMapping[str, Any] = copy.deepcopy(dict(source_payload))
     default_tz = _parse_offset(default_offset)
+    enums = _load_schema_enums(schema_path.resolve())
 
     # Small aliases make handwritten notes convenient without guessing at meaning.
     if "action" not in payload and "summary" in payload:
@@ -472,14 +600,14 @@ def normalize_receipt(
             "version": VERSION,
             "occurred_at": occurred_at,
             "recorded_at": normalized_recorded_at,
-            "source": _normalize_source(payload.get("source")),
+            "source": _normalize_source(payload.get("source"), enums),
             "action": _normalize_action(payload.get("action")),
-            "traces": _normalize_traces(payload.get("traces"), default_tz),
-            "context": _plain(payload.get("context") or {}),
-            "normalization": _normalize_normalization(payload.get("normalization")),
-            "pause": _normalize_pause(payload.get("pause"), default_tz),
-            "reflection": _normalize_reflection(payload.get("reflection")),
-            "outputs": _normalize_outputs(payload.get("outputs"), default_tz),
+            "traces": _normalize_traces(payload.get("traces"), default_tz, enums),
+            "context": _normalize_context(payload.get("context")),
+            "normalization": _normalize_normalization(payload.get("normalization"), enums),
+            "pause": _normalize_pause(payload.get("pause"), default_tz, enums),
+            "reflection": _normalize_reflection(payload.get("reflection"), enums),
+            "outputs": _normalize_outputs(payload.get("outputs"), default_tz, enums),
         }
     }
     return normalized
@@ -572,17 +700,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.input.exists():
             raise NormalizationError(f"Input file not found: {args.input}")
         raw = yaml.safe_load(args.input.read_text(encoding="utf-8"))
+
+        if args.check:
+            validate_document(_plain(raw), args.schema)
+            print(f"OK: {args.input}", file=sys.stderr)
+            return 0
+
         document = normalize_receipt(
             raw,
             recorded_at=args.recorded_at,
             default_offset=args.default_offset,
+            schema_path=args.schema,
         )
         if not args.no_validate:
             validate_document(document, args.schema)
-
-        if args.check:
-            print(f"OK: {args.input}", file=sys.stderr)
-            return 0
 
         rendered = _dump_yaml(document)
         if args.in_place:
